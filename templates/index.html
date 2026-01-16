@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Group Chat</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #ea66b1, #9ca24b);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chat-container {
+            background: #fff;
+            width: 420px;
+            height: 580px;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: #ac5ad8;
+            color: white;
+            padding: 16px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .join-box {
+            padding: 16px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .join-box input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            outline: none;
+        }
+
+        .join-box button {
+            width: 100%;
+            padding: 10px;
+            background: #b4d85a;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background: #f7f7f7;
+        }
+
+        .message {
+            max-width: 75%;
+            margin-bottom: 10px;
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .left {
+            background: #e2e8f0;
+            align-self: flex-start;
+        }
+
+        .right {
+            background: #d85aaa;
+            color: white;
+            align-self: flex-end;
+        }
+
+        .input-box {
+            display: flex;
+            padding: 12px;
+            border-top: 1px solid #ddd;
+            background: #fff;
+        }
+
+        .input-box input {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            outline: none;
+        }
+
+        .input-box button {
+            margin-left: 8px;
+            padding: 10px 16px;
+            background: #5a67d8;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="header"> Live Group Chat</div>
+
+    <div class="join-box">
+        <input id="username" placeholder="Enter your name">
+        <input id="room" placeholder="Enter room name">
+        <button onclick="joinRoom()">Join Room</button>
+    </div>
+
+    <div class="messages" id="messages"></div>
+
+    <div class="input-box">
+        <input id="message" placeholder="Type a message..." onkeypress="enterKey(event)">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    let currentRoom = "";
+    let currentUser = "";
+
+    function joinRoom() {
+        currentUser = document.getElementById("username").value;
+        currentRoom = document.getElementById("room").value;
+
+        if (!currentUser || !currentRoom) {
+            alert("Please enter name and room");
+            return;
+        }
+
+        socket.emit('join_room', {
+            username: currentUser,
+            room: currentRoom
+        });
+    }
+
+    function sendMessage() {
+        const msgInput = document.getElementById("message");
+        const msg = msgInput.value;
+
+        if (!msg) return;
+
+        socket.emit('room_message', {
+            room: currentRoom,
+            msg: currentUser + ": " + msg
+        });
+
+        addMessage(msg, "right");
+        msgInput.value = "";
+    }
+
+    function addMessage(text, side) {
+        const messages = document.getElementById("messages");
+        const div = document.createElement("div");
+        div.className = "message " + side;
+        div.innerText = text;
+        messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    socket.on('message', function(msg) {
+        addMessage(msg, "left");
+    });
+
+    function enterKey(e) {
+        if (e.key === "Enter") {
+            sendMessage();
+        }
+    }
+</script>
+
+</body>
+</html>
+
