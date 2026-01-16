@@ -24,11 +24,13 @@ def handle_room_message(data):
     msg = data['msg']
     emit('message', msg, to=room)
 
+import os
+
 if __name__ == '__main__':
-    socketio.run(app, host='127.0.0.1', port=8000, debug=True)
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
+    # Render provides a PORT environment variable; if it's not there, default to 5000
+    port = int(os.environ.get("PORT", 5000))
+    
+    # Use 0.0.0.0 to allow Render's network to access the app
+    socketio.run(app, host='0.0.0.0', port=port)
 
 
