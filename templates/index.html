@@ -2,57 +2,102 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Live Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Hangout</title>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
 <style>
 body {
-  margin: 0;
-  font-family: sans-serif;
-  background: linear-gradient(135deg,#ea66b1,#9ca24b);
-  height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+    margin: 0;
+    font-family: Segoe UI;
+    background: linear-gradient(135deg, #ea66b1, #9ca24b);
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .chat-container {
-  width: 100%;
-  max-width: 420px;
-  height: 90vh;
-  background: white;
-  border-radius: 16px;
-  display: flex;
-  flex-direction: column;
+    background: white;
+    width: 420px;
+    height: 580px;
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.header {
+    background: #ac5ad8;
+    color: white;
+    padding: 15px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.join-box {
+    padding: 10px;
+}
+
+.join-box input {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 6px;
 }
 
 .messages {
-  flex: 1;
-  padding: 10px;
-  overflow-y: auto;
-  background: #f4f4f4;
+    flex: 1;
+    padding: 10px;
+    background: #f7f7f7;
+    overflow-y: auto;
 }
 
 .message {
-  margin: 8px 0;
-  padding: 10px;
-  border-radius: 12px;
-  max-width: 75%;
+    margin-bottom: 8px;
+    padding: 8px;
+    border-radius: 10px;
 }
 
 .left { background: #e2e8f0; }
-.right { background: #d85aaa; color: white; margin-left: auto; }
+.right { background: #d85aaa; color: white; text-align: right; }
 
 .typing {
-  font-size: 12px;
-  padding: 5px;
-  color: gray;
+    font-size: 12px;
+    color: gray;
+    padding-left: 10px;
 }
 
 .input-box {
-  display: flex;
-  gap: 5px;
-  padding: 10px;
+    display: flex;
+    gap: 5px;
+    padding: 8px;
+}
+
+input[type="text"] {
+    flex: 1;
+    padding: 8px;
+}
+
+button {
+    padding: 8px 10px;
+    border: none;
+    background: #5a67d8;
+    color: white;
+    border-radius: 6px;
+}
+
+img {
+    max-width: 150px;
+    border-radius: 8px;
+}
+
+@media(max-width:600px){
+    .chat-container {
+        width: 100%;
+        height: 100vh;
+        border-radius: 0;
+    }
 }
 </style>
 </head>
@@ -60,99 +105,121 @@ body {
 <body>
 
 <div class="chat-container">
-  <div class="messages" id="messages"></div>
-  <div class="typing" id="typing"></div>
+    <div class="header">Hangout</div>
 
-  <div class="input-box">
-    <input id="msg" placeholder="Message..." style="flex:1" oninput="typing()">
-    <button onclick="openImage()">📷</button>
-    <button onclick="send()">Send</button>
-  </div>
+    <div class="join-box">
+        <input id="username" placeholder="Name">
+        <input id="room" placeholder="Room">
+        <button onclick="joinRoom()">Join</button>
+        <div id="online"></div>
+    </div>
+
+    <div class="messages" id="messages"></div>
+    <div class="typing" id="typing"></div>
+
+    <div class="input-box">
+        <input id="message" placeholder="Type a message" oninput="typingEvent()">
+
+        <input
+            type="file"
+            id="imageInput"
+            accept="image/*"
+            hidden
+            onchange="sendImage()">
+
+        <button onclick="document.getElementById('imageInput').click()">📷</button>
+        <button onclick="addEmoji('😊')">😊</button>
+        <button onclick="sendMessage()">Send</button>
+    </div>
 </div>
 
-<input type="file" id="imageInput"
-accept="image/png, image/jpeg, image/jpg" hidden>
+<audio id="sound">
+  <source src="https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3">
+</audio>
 
 <script>
 const socket = io();
-const room = "global";
-const username = prompt("Enter your name");
+let user = "", room = "";
+let typingTimeout;
 
-socket.emit("join_room", { room, username });
+function joinRoom(){
+    user = document.getElementById("username").value;
+    room = document.getElementById("room").value;
 
-function addMessage(text, side) {
-  let div = document.createElement("div");
-  div.className = "message " + side;
-  div.innerText = text;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
+    socket.emit('join_room', { username: user, room: room });
 }
 
-function addImage(src, side) {
-  let img = document.createElement("img");
-  img.src = src;
-  img.style.maxWidth = "200px";
-  img.style.borderRadius = "10px";
-  let div = document.createElement("div");
-  div.className = "message " + side;
-  div.appendChild(img);
-  messages.appendChild(div);
-}
+function sendMessage(){
+    let msg = message.value;
+    if(!msg) return;
 
-function send() {
-  let text = msg.value;
-  if (!text) return;
-
-  socket.emit("send_message", { room, username, message: text });
-  addMessage("You: " + text, "right");
-  msg.value = "";
-}
-
-function typing() {
-  socket.emit("typing", { room, username });
-}
-
-socket.on("typing", data => {
-  typing.innerText = `${data.username} is typing...`;
-  setTimeout(() => typing.innerText = "", 1000);
-});
-
-socket.on("receive_message", data => {
-  addMessage(data.username + ": " + data.message, "left");
-});
-
-socket.on("receive_image", data => {
-  addImage(data.image, "left");
-});
-
-socket.on("receive_history", data => {
-  if (data.message) {
-    addMessage(data.username + ": " + data.message, "left");
-  }
-  if (data.image) {
-    addImage(data.image, "left");
-  }
-});
-
-function openImage() {
-  imageInput.click();
-}
-
-imageInput.onchange = () => {
-  const file = imageInput.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = () => {
-    socket.emit("send_image", {
-      room,
-      username,
-      image: reader.result
+    socket.emit('room_message', {
+        room: room,
+        msg: user + ": " + msg
     });
-  };
-  reader.readAsDataURL(file);
-};
+
+    messages.innerHTML += `<div class="message right">${user}: ${msg}</div>`;
+    message.value = "";
+}
+
+function typingEvent(){
+    socket.emit('typing', { username: user, room: room });
+
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+        socket.emit('stop_typing', { username: user, room: room });
+    }, 1000);
+}
+
+function sendImage(){
+    let file = imageInput.files[0];
+    if(!file || file.size > 2 * 1024 * 1024) {
+        alert("Image too large (max 2MB)");
+        return;
+    }
+
+    let reader = new FileReader();
+    reader.onload = () => {
+        socket.emit('image_upload', {
+            room: room,
+            username: user,
+            file: reader.result,
+            filename: file.name
+        });
+    };
+    reader.readAsDataURL(file);
+}
+
+function addEmoji(emoji){
+    message.value += emoji;
+}
+
+socket.on('message', msg => {
+    messages.innerHTML += `<div class="message left">${msg}</div>`;
+    sound.play();
+});
+
+socket.on('image_message', data => {
+    messages.innerHTML += `
+        <div class="message left">
+            <b>${data.username}</b><br>
+            <img src="${data.image_url}">
+        </div>`;
+});
+
+socket.on('update_users', users => {
+    online.innerHTML = "🟢 Online: " + users.join(", ");
+});
+
+socket.on('show_typing', user => {
+    typing.innerText = user + " is typing...";
+});
+
+socket.on('hide_typing', () => {
+    typing.innerText = "";
+});
 </script>
 
 </body>
 </html>
+
