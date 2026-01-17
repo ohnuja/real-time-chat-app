@@ -1,103 +1,89 @@
 import os
-import base64
-from flask import Flask, render_template, request
+import sqlite3
+from flask import Flask, render_template
 from flask_socketio import SocketIO, join_room, emit
-from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret'
-
-# Upload config
-UPLOAD_FOLDER = 'static/uploads'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# In-memory storage
-users_in_rooms = {}      # { room: [user1, user2] }
-user_sessions = {}       # { sid: {username, room} }
+DB_NAME = "chat.db"
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# ---------- DATABASE ----------
+def init_db():
+    with sqlite3.connect(DB_NAME) as con:
+        cur = con.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room TEXT,
+            username TEXT,
+            message TEXT,
+            image TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        con.commit()
 
+init_db()
+
+# ---------- ROUTE ----------
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ---------------- SOCKET EVENTS ---------------- #
-
+# ---------- SOCKET EVENTS ----------
 @socketio.on('join_room')
-def handle_join(data):
-    username = data['username']
+def join(data):
     room = data['room']
-
-    user_sessions[request.sid] = {
-        "username": username,
-        "room": room
-    }
-
     join_room(room)
 
-    if room not in users_in_rooms:
-        users_in_rooms[room] = []
+    # Send previous messages
+    with sqlite3.connect(DB_NAME) as con:
+        cur = con.cursor()
+        cur.execute("SELECT username, message, image FROM messages WHERE room=?", (room,))
+        history = cur.fetchall()
 
-    if username not in users_in_rooms[room]:
-        users_in_rooms[room].append(username)
+    for msg in history:
+        emit('receive_history', {
+            "username": msg[0],
+            "message": msg[1],
+            "image": msg[2]
+        })
 
-    emit('update_users', users_in_rooms[room], to=room)
-    emit('message', f"{username} joined the room", to=room)
+    emit('status', f"🟢 {data['username']} joined", to=room)
 
-@socketio.on('room_message')
-def handle_message(data):
-    emit('message', data['msg'], to=data['room'])
+@socketio.on('send_message')
+def message(data):
+    with sqlite3.connect(DB_NAME) as con:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO messages (room, username, message) VALUES (?, ?, ?)",
+            (data['room'], data['username'], data['message'])
+        )
+        con.commit()
+
+    emit('receive_message', data, to=data['room'])
+
+@socketio.on('send_image')
+def image(data):
+    with sqlite3.connect(DB_NAME) as con:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO messages (room, username, image) VALUES (?, ?, ?)",
+            (data['room'], data['username'], data['image'])
+        )
+        con.commit()
+
+    emit('receive_image', data, to=data['room'])
 
 @socketio.on('typing')
-def handle_typing(data):
-    emit('show_typing', data['username'], to=data['room'], include_self=False)
+def typing(data):
+    emit('typing', data, to=data['room'], include_self=False)
 
-@socketio.on('stop_typing')
-def handle_stop_typing(data):
-    emit('hide_typing', data['username'], to=data['room'], include_self=False)
-
-@socketio.on('image_upload')
-def handle_image(data):
-    filename = secure_filename(data['filename'])
-
-    if not allowed_file(filename):
-        return
-
-    image_data = base64.b64decode(data['file'].split(',')[1])
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-
-    with open(filepath, 'wb') as f:
-        f.write(image_data)
-
-    emit('image_message', {
-        'username': data['username'],
-        'image_url': f"/static/uploads/{filename}"
-    }, to=data['room'])
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    user = user_sessions.get(request.sid)
-    if not user:
-        return
-
-    room = user['room']
-    username = user['username']
-
-    if room in users_in_rooms and username in users_in_rooms[room]:
-        users_in_rooms[room].remove(username)
-
-        emit('update_users', users_in_rooms[room], to=room)
-        emit('message', f"{username} left the room", to=room)
-
-    del user_sessions[request.sid]
-
-# ---------------- RUN ---------------- #
-
+# ---------- RUN ----------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port)
-
