@@ -1,14 +1,17 @@
 import os
 import sqlite3
 from flask import Flask, render_template
-from flask_socketio import SocketIO, join_room, leave_room, emit
+from flask_socketio import SocketIO, join_room, emit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret'
 
-# ❌ REMOVED MAX_CONTENT_LENGTH → no image size restriction
-
-socketio = SocketIO(app, cors_allowed_origins="*")
+# 🔥 IMPORTANT FIX: Increase Socket.IO payload limit
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    max_http_buffer_size=100 * 1024 * 1024  # 100MB
+)
 
 DB = "chat.db"
 online_users = {}
@@ -101,3 +104,4 @@ def disconnect():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port)
+
