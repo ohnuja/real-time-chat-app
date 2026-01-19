@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <title>Hangout</title>
+
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
 <style>
 body {
     margin: 0;
-    font-family: Segoe UI;
-    background: linear-gradient(135deg, #ea66b1, #9ca24b);
+    font-family: Segoe UI, sans-serif;
+    background: linear-gradient(135deg,#ea66b1,#9ca24b);
     height: 100vh;
     display: flex;
     justify-content: center;
@@ -57,10 +57,16 @@ body {
     margin-bottom: 8px;
     padding: 8px;
     border-radius: 10px;
+    max-width: 75%;
 }
 
 .left { background: #e2e8f0; }
-.right { background: #d85aaa; color: white; text-align: right; }
+.right {
+    background: #d85aaa;
+    color: white;
+    margin-left: auto;
+    text-align: right;
+}
 
 .typing {
     font-size: 12px;
@@ -88,7 +94,7 @@ button {
 }
 
 img {
-    max-width: 150px;
+    max-width: 200px;
     border-radius: 8px;
 }
 
@@ -120,12 +126,7 @@ img {
     <div class="input-box">
         <input id="message" placeholder="Type a message" oninput="typingEvent()">
 
-        <input
-            type="file"
-            id="imageInput"
-            accept="image/*"
-            hidden
-            onchange="sendImage()">
+        <input type="file" id="imageInput" accept="image/*" hidden onchange="sendImage()">
 
         <button onclick="document.getElementById('imageInput').click()">📷</button>
         <button onclick="addEmoji('😊')">😊</button>
@@ -134,72 +135,78 @@ img {
 </div>
 
 <audio id="sound">
-  <source src="https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3">
+    <source src="https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3">
 </audio>
 
 <script>
 const socket = io();
-let user = "", room = "";
+let user = "";
+let room = "";
 let typingTimeout;
 
-function joinRoom(){
+const messages = document.getElementById("messages");
+const typing = document.getElementById("typing");
+const sound = document.getElementById("sound");
+
+function joinRoom() {
     user = document.getElementById("username").value;
     room = document.getElementById("room").value;
 
-    socket.emit('join_room', { username: user, room: room });
+    if (!user || !room) return alert("Enter name & room");
+
+    socket.emit("join_room", { username: user, room: room });
 }
 
-function sendMessage(){
-    let msg = message.value;
-    if(!msg) return;
+function sendMessage() {
+    const msg = message.value;
+    if (!msg) return;
 
-    socket.emit('room_message', {
+    socket.emit("room_message", {
         room: room,
-        msg: user + ": " + msg
+        username: user,
+        msg: msg
     });
 
     messages.innerHTML += `<div class="message right">${user}: ${msg}</div>`;
     message.value = "";
 }
 
-function typingEvent(){
-    socket.emit('typing', { username: user, room: room });
+function sendImage() {
+    const file = imageInput.files[0];
+    if (!file) return;
 
-    clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => {
-        socket.emit('stop_typing', { username: user, room: room });
-    }, 1000);
-}
-
-function sendImage(){
-    let file = imageInput.files[0];
-    if(!file || file.size > 2 * 1024 * 1024) {
-        alert("Image too large (max 2MB)");
-        return;
-    }
-
-    let reader = new FileReader();
+    const reader = new FileReader();
     reader.onload = () => {
-        socket.emit('image_upload', {
+        socket.emit("image_upload", {
             room: room,
             username: user,
-            file: reader.result,
-            filename: file.name
+            file: reader.result
         });
     };
     reader.readAsDataURL(file);
 }
 
-function addEmoji(emoji){
-    message.value += emoji;
+function typingEvent() {
+    socket.emit("typing", { username: user, room: room });
+
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+        socket.emit("stop_typing", { room: room });
+    }, 1000);
 }
 
-socket.on('message', msg => {
-    messages.innerHTML += `<div class="message left">${msg}</div>`;
+function addEmoji(e) {
+    message.value += e;
+}
+
+/* ---------- SOCKET LISTENERS ---------- */
+
+socket.on("receive_message", data => {
+    messages.innerHTML += `<div class="message left">${data.username}: ${data.msg}</div>`;
     sound.play();
 });
 
-socket.on('image_message', data => {
+socket.on("image_message", data => {
     messages.innerHTML += `
         <div class="message left">
             <b>${data.username}</b><br>
@@ -207,19 +214,33 @@ socket.on('image_message', data => {
         </div>`;
 });
 
-socket.on('update_users', users => {
+socket.on("receive_history", data => {
+    if (data.message) {
+        messages.innerHTML += `<div class="message left">${data.username}: ${data.message}</div>`;
+    }
+    if (data.image) {
+        messages.innerHTML += `
+            <div class="message left">
+                <b>${data.username}</b><br>
+                <img src="${data.image}">
+            </div>`;
+    }
+});
+
+socket.on("update_users", users => {
     online.innerHTML = "🟢 Online: " + users.join(", ");
 });
 
-socket.on('show_typing', user => {
-    typing.innerText = user + " is typing...";
+socket.on("show_typing", username => {
+    typing.innerText = username + " is typing...";
 });
 
-socket.on('hide_typing', () => {
+socket.on("hide_typing", () => {
     typing.innerText = "";
 });
 </script>
 
 </body>
 </html>
+
 

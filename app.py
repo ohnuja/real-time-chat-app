@@ -1,20 +1,19 @@
 import os
 import sqlite3
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret'
 
-# Increase limit so images work well
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB
-
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 DB = "chat.db"
+
+# room -> { sid: username }
 online_users = {}
 
-# ---------------- DATABASE ----------------
+# ---------- DATABASE ----------
 def init_db():
     with sqlite3.connect(DB) as con:
         con.execute("""
@@ -27,27 +26,31 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
+        con.commit()
+
 init_db()
 
-# ---------------- ROUTE ----------------
+# ---------- ROUTE ----------
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ---------------- SOCKET EVENTS ----------------
+# ---------- SOCKET EVENTS ----------
 @socketio.on('join_room')
 def join(data):
     username = data['username']
     room = data['room']
+    sid = request.sid
 
     join_room(room)
 
-    # Track online users
-    online_users.setdefault(room, set()).add(username)
+    online_users.setdefault(room, {})
+    online_users[room][sid] = username
 
-    emit('update_users', list(online_users[room]), to=room)
+    emit('update_users', list(online_users[room].values()), to=room)
+    emit('status', f"🟢 {username} joined", to=room)
 
-    # Send chat history
+    # Send history
     with sqlite3.connect(DB) as con:
         rows = con.execute(
             "SELECT username, message, image FROM messages WHERE room=?",
@@ -55,45 +58,36 @@ def join(data):
         ).fetchall()
 
     for r in rows:
-        if r[1]:
-            emit('message', f"{r[0]}: {r[1]}")
-        if r[2]:
-            emit('image_message', {
-                "username": r[0],
-                "image_url": r[2]
-            })
+        emit('receive_history', {
+            "username": r[0],
+            "message": r[1],
+            "image": r[2]
+        })
 
 @socketio.on('room_message')
 def handle_message(data):
-    room = data['room']
-    msg = data['msg']
-
-    username = msg.split(":")[0]
-
     with sqlite3.connect(DB) as con:
         con.execute(
             "INSERT INTO messages (room, username, message) VALUES (?, ?, ?)",
-            (room, username, msg.replace(username + ": ", ""))
+            (data['room'], data['username'], data['msg'])
         )
+        con.commit()
 
-    emit('message', msg, to=room)
+    emit('receive_message', data, to=data['room'])
 
 @socketio.on('image_upload')
 def image_upload(data):
-    room = data['room']
-    username = data['username']
-    image = data['file']
-
     with sqlite3.connect(DB) as con:
         con.execute(
             "INSERT INTO messages (room, username, image) VALUES (?, ?, ?)",
-            (room, username, image)
+            (data['room'], data['username'], data['file'])
         )
+        con.commit()
 
     emit('image_message', {
-        "username": username,
-        "image_url": image
-    }, to=room)
+        "username": data['username'],
+        "image_url": data['file']
+    }, to=data['room'])
 
 @socketio.on('typing')
 def typing(data):
@@ -105,13 +99,16 @@ def stop_typing(data):
 
 @socketio.on('disconnect')
 def disconnect():
-    # Clean online users (best-effort)
-    for room in online_users:
-        online_users[room] = set()
+    sid = request.sid
+    for room in list(online_users.keys()):
+        if sid in online_users[room]:
+            username = online_users[room].pop(sid)
+            emit('update_users', list(online_users[room].values()), to=room)
+            emit('status', f"🔴 {username} left", to=room)
+        if not online_users[room]:
+            del online_users[room]
 
-# ---------------- RUN ----------------
+# ---------- RUN ----------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port)
-
-
