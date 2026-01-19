@@ -1,19 +1,19 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request
+from flask import Flask, render_template
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret'
 
+# ❌ REMOVED MAX_CONTENT_LENGTH → no image size restriction
+
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 DB = "chat.db"
-
-# room -> { sid: username }
 online_users = {}
 
-# ---------- DATABASE ----------
+# ---------------- DATABASE ----------------
 def init_db():
     with sqlite3.connect(DB) as con:
         con.execute("""
@@ -30,27 +30,22 @@ def init_db():
 
 init_db()
 
-# ---------- ROUTE ----------
+# ---------------- ROUTE ----------------
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ---------- SOCKET EVENTS ----------
+# ---------------- SOCKET EVENTS ----------------
 @socketio.on('join_room')
 def join(data):
     username = data['username']
     room = data['room']
-    sid = request.sid
 
     join_room(room)
 
-    online_users.setdefault(room, {})
-    online_users[room][sid] = username
+    online_users.setdefault(room, set()).add(username)
+    emit('update_users', list(online_users[room]), to=room)
 
-    emit('update_users', list(online_users[room].values()), to=room)
-    emit('status', f"🟢 {username} joined", to=room)
-
-    # Send history
     with sqlite3.connect(DB) as con:
         rows = con.execute(
             "SELECT username, message, image FROM messages WHERE room=?",
@@ -99,16 +94,10 @@ def stop_typing(data):
 
 @socketio.on('disconnect')
 def disconnect():
-    sid = request.sid
-    for room in list(online_users.keys()):
-        if sid in online_users[room]:
-            username = online_users[room].pop(sid)
-            emit('update_users', list(online_users[room].values()), to=room)
-            emit('status', f"🔴 {username} left", to=room)
-        if not online_users[room]:
-            del online_users[room]
+    for room in online_users:
+        online_users[room].clear()
 
-# ---------- RUN ----------
+# ---------------- RUN ----------------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port)
